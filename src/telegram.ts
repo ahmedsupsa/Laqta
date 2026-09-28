@@ -15,10 +15,17 @@ async function tg(env: Env, method: string, body: BodyInit, headers?: HeadersIni
   return fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, { method: "POST", body, headers });
 }
 
-async function sendText(env: Env, chatId: number, text: string, replyMarkup?: object) {
+async function sendText(env: Env, chatId: number, text: string, replyMarkup?: object): Promise<number | undefined> {
   const payload: Record<string, unknown> = { chat_id: chatId, text };
   if (replyMarkup) payload.reply_markup = replyMarkup;
-  await tg(env, "sendMessage", JSON.stringify(payload), { "content-type": "application/json" });
+  const res = await tg(env, "sendMessage", JSON.stringify(payload), { "content-type": "application/json" });
+  if (!res.ok) return undefined;
+  const data = await res.json<{ result?: { message_id?: number } }>();
+  return data.result?.message_id;
+}
+
+async function deleteMessage(env: Env, chatId: number, messageId: number) {
+  await tg(env, "deleteMessage", JSON.stringify({ chat_id: chatId, message_id: messageId }), { "content-type": "application/json" });
 }
 
 async function answerCallback(env: Env, callbackId: string, text?: string) {
@@ -81,14 +88,20 @@ function parse(text: string): ShotOptions {
 }
 
 async function capture(env: Env, chatId: number, options: ShotOptions) {
-  await sendText(env, chatId, `⏳ جاري التصوير: ${options.device}${options.fullPage ? " • صفحة كاملة" : ""}${options.theme === "dark" ? " • داكن" : ""}...`);
-  const png = await takeScreenshot(env, options);
-  const form = new FormData();
-  form.set("chat_id", String(chatId));
-  form.set("caption", `📸 ${new URL(options.url).hostname} • ${options.device}${options.fullPage ? " • full page" : ""}${options.theme === "dark" ? " • dark" : ""}`);
-  form.set("document", new Blob([png], { type: "image/png" }), "laqta.png");
-  const res = await tg(env, "sendDocument", form);
-  if (!res.ok) throw new Error(`Telegram upload failed (${res.status})`);
+  const progressMessageId = await sendText(env, chatId, `⏳ جاري التصوير: ${options.device}${options.fullPage ? " • صفحة كاملة" : ""}${options.theme === "dark" ? " • داكن" : ""}...`);
+  try {
+    const png = await takeScreenshot(env, options);
+    const form = new FormData();
+    form.set("chat_id", String(chatId));
+    form.set("caption", `📸 ${new URL(options.url).hostname} • ${options.device}${options.fullPage ? " • full page" : ""}${options.theme === "dark" ? " • dark" : ""}`);
+    form.set("document", new Blob([png], { type: "image/png" }), "laqta.png");
+    const res = await tg(env, "sendDocument", form);
+    if (!res.ok) throw new Error(`Telegram upload failed (${res.status})`);
+    if (progressMessageId) await deleteMessage(env, chatId, progressMessageId);
+  } catch (error) {
+    if (progressMessageId) await deleteMessage(env, chatId, progressMessageId);
+    throw error;
+  }
 }
 
 export async function handleTelegram(request: Request, env: Env): Promise<Response> {
