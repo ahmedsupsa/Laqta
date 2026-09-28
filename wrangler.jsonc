@@ -1,8 +1,8 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "laqta-bot",
+  "name": "laqta",
   "main": "src/index.ts",
-  "compatibility_date": "2026-09-29",
+  "compatibility_date": "2026-09-28",
   "compatibility_flags": ["nodejs_compat"],
   "browser": { "binding": "BROWSER" }
 }
